@@ -5,6 +5,11 @@ import io
 import math
 
 # -------------------------------------------------
+# CONFIG
+# -------------------------------------------------
+MARKUP = 1.8
+
+# -------------------------------------------------
 # Session State Init
 # -------------------------------------------------
 if "excel_buffer" not in st.session_state:
@@ -18,8 +23,6 @@ if "word_buffer" not in st.session_state:
 # -------------------------------------------------
 st.set_page_config(page_title="Offer Generator", layout="centered")
 st.title("Offer Generator")
-
-MARKUP = 1.8   # single source of truth
 
 # -------------------------------------------------
 # STEP 1: COMMERCIAL DETAILS
@@ -47,25 +50,11 @@ st.divider()
 # -------------------------------------------------
 st.subheader("Step 2: Burner Size Calculation – Inputs")
 
-input_df = pd.DataFrame(
-    {
-        "Parameter": [
-            "Ti",
-            "Tf",
-            "Actual Refractory Weight",
-            "MG Fuel CV",
-            "Time Taken"
-        ],
-        "Value": [
-            650.0,
-            1200.0,
-            21500.0,
-            8500.0,
-            1.0
-        ],
-        "Unit": ["°C", "°C", "Kg", "Kcal/Nm³", "Hours"]
-    }
-)
+input_df = pd.DataFrame({
+    "Parameter": ["Ti", "Tf", "Actual Refractory Weight", "MG Fuel CV", "Time Taken"],
+    "Value": [650.0, 1200.0, 21500.0, 8500.0, 1.0],
+    "Unit": ["°C", "°C", "Kg", "Kcal/Nm³", "Hours"]
+})
 
 edited_df = st.data_editor(
     input_df,
@@ -86,7 +75,6 @@ time_taken = values["Time Taken"]
 # STEP 3: CALCULATIONS
 # -------------------------------------------------
 avg_temp = ((Tf + 200) / 2) - ((Ti + 100) / 2)
-
 firing_rate = weight * 0.25 * avg_temp
 heat_load = firing_rate / 0.52
 fuel_consumption = heat_load / fuel_cv
@@ -138,7 +126,7 @@ if st.button("Generate Offer & Calculation Excel"):
     ], columns=["Parameter", "Value", "Unit"])
 
     # -----------------------------
-    # BOM
+    # BOM DATA
     # -----------------------------
     bom_columns = [
         "S. No.", "MEDIA", "ITEM NAME", "Data Sheet No / Reference",
@@ -181,7 +169,7 @@ if st.button("Generate Offer & Calculation Excel"):
     bought_out_sell = bought_out_cost * MARKUP
 
     # -----------------------------
-    # ENCON ITEMS (SELL SOURCE)
+    # ENCON ITEMS
     # -----------------------------
     encon_df = pd.DataFrame([
         [1,"MISC ITEMS","ENCON MG BURNER WITH B. BLOCK","NATURAL GAS FLOW: 440 Nm3/hr G7A",1,"No.","ENCON",118000,118000],
@@ -196,60 +184,54 @@ if st.button("Generate Offer & Calculation Excel"):
     inhouse_cost = inhouse_sell / MARKUP
 
     # -----------------------------
-    # COST SUMMARY
+    # BUILD VLPH-120T WITH SEPARATION
+    # -----------------------------
+    blank = pd.DataFrame([[""] * len(bom_columns)], columns=bom_columns)
+
+    vlph_df = pd.concat([
+        bom_df,
+        blank, blank,
+        pd.DataFrame([["", "", "BOUGHT OUT ITEMS", "", "", "", "", "", bought_out_cost]], columns=bom_columns),
+        pd.DataFrame([["", "", f"TOTAL x {MARKUP}", "", "", "", "", "", bought_out_sell]], columns=bom_columns),
+        blank, blank,
+        encon_df,
+        blank,
+        pd.DataFrame([["", "", "ENCON ITEMS", "", "", "", "", "", inhouse_sell]], columns=bom_columns),
+    ], ignore_index=True)
+
+    # -----------------------------
+    # COST SUMMARY (VERTICAL ONLY)
     # -----------------------------
     unit_cost = bought_out_cost + inhouse_cost
     unit_sell = bought_out_sell + inhouse_sell
-
     designing_10 = unit_sell * 0.10
     negotiation_10 = unit_sell * 0.10
-
     total_price = unit_sell + designing_10 + negotiation_10
     usd_price = total_price / 85
 
-    cost_summary_df = pd.DataFrame(
-        [[
-            1,
-            "Vertical Ladle Preheater",
-            bought_out_cost,
-            bought_out_sell,
-            inhouse_cost,
-            inhouse_sell,
-            unit_cost,
-            unit_sell,
-            designing_10,
-            negotiation_10,
-            1,
-            total_price,
-            MARKUP,
-            usd_price
-        ]],
-        columns=[
-            "S.No.",
-            "Item Description",
-            "Bought Out Cost Price",
-            "Bought Out Sell Price",
-            "Inhouse Cost Price",
-            "Inhouse Sell Price",
-            "Unit Cost Price",
-            "Unit Sell Price",
-            "10% Designing",
-            "10% Negotiation",
-            "Qty/Set",
-            "Total Price",
-            "Markup",
-            "USD"
-        ]
-    )
+    cost_summary_df = pd.DataFrame([[
+        1, "Vertical Ladle Preheater",
+        bought_out_cost, bought_out_sell,
+        inhouse_cost, inhouse_sell,
+        unit_cost, unit_sell,
+        designing_10, negotiation_10,
+        1, total_price, MARKUP, usd_price
+    ]], columns=[
+        "S.No.", "Item Description",
+        "Bought Out Cost Price", "Bought Out Sell Price",
+        "Inhouse Cost Price", "Inhouse Sell Price",
+        "Unit Cost Price", "Unit Sell Price",
+        "10% Designing", "10% Negotiation",
+        "Qty/Set", "Total Price", "Markup", "USD"
+    ])
 
     # -----------------------------
     # WRITE EXCEL
     # -----------------------------
     st.session_state.excel_buffer = io.BytesIO()
-
     with pd.ExcelWriter(st.session_state.excel_buffer, engine="xlsxwriter") as writer:
         calculation_df.to_excel(writer, sheet_name="Calculation", index=False)
-        bom_df.to_excel(writer, sheet_name="VLPH-120T", index=False)
+        vlph_df.to_excel(writer, sheet_name="VLPH-120T", index=False)
         cost_summary_df.to_excel(writer, sheet_name="Cost Summary", index=False)
 
     st.session_state.excel_buffer.seek(0)
