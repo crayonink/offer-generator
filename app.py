@@ -2,6 +2,7 @@ import streamlit as st
 from docxtpl import DocxTemplate
 import pandas as pd
 import io
+import math
 
 # -------------------------------------------------
 # Session State Init
@@ -17,6 +18,8 @@ if "word_buffer" not in st.session_state:
 # -------------------------------------------------
 st.set_page_config(page_title="Offer Generator", layout="centered")
 st.title("Offer Generator")
+
+MARKUP = 1.8   # single source of truth
 
 # -------------------------------------------------
 # STEP 1: COMMERCIAL DETAILS
@@ -71,11 +74,6 @@ edited_df = st.data_editor(
     use_container_width=True
 )
 
-st.divider()
-
-# -------------------------------------------------
-# STEP 3: EXTRACT INPUTS
-# -------------------------------------------------
 values = dict(zip(edited_df["Parameter"], edited_df["Value"]))
 
 Ti = values["Ti"]
@@ -85,7 +83,7 @@ fuel_cv = values["MG Fuel CV"]
 time_taken = values["Time Taken"]
 
 # -------------------------------------------------
-# STEP 4: CALCULATIONS (EXACT EXCEL MATCH)
+# STEP 3: CALCULATIONS
 # -------------------------------------------------
 avg_temp = ((Tf + 200) / 2) - ((Ti + 100) / 2)
 
@@ -100,7 +98,7 @@ cfm = air_qty / 1.7
 blower_size_calc = cfm / 114
 
 # -------------------------------------------------
-# STEP 5: WORD CONTEXT
+# WORD CONTEXT
 # -------------------------------------------------
 offer_context = {
     "company_name": company_name,
@@ -113,7 +111,7 @@ offer_context = {
 }
 
 # -------------------------------------------------
-# STEP 6: GENERATE OFFER + EXCEL (3 SHEETS)
+# GENERATE FILES
 # -------------------------------------------------
 if st.button("Generate Offer & Calculation Excel"):
 
@@ -121,51 +119,146 @@ if st.button("Generate Offer & Calculation Excel"):
         st.error("Please fill all mandatory commercial fields")
         st.stop()
 
-    # -------- Sheet 1: Calculation --------
+    # -----------------------------
+    # CALCULATION SHEET
+    # -----------------------------
     calculation_df = pd.DataFrame([
         ["Ti", Ti, "°C"],
         ["Tf", Tf, "°C"],
         ["Actual Refractory Weight", weight, "Kg"],
         ["MG Fuel CV", fuel_cv, "Kcal/Nm³"],
-        ["Average Temperature to be raised", avg_temp, "°C"],
+        ["Average Temperature Rise", avg_temp, "°C"],
         ["Time Taken", time_taken, "Hr"],
-        ["Firing rate", firing_rate, "Kcal"],
+        ["Firing Rate", firing_rate, "Kcal"],
         ["Heat Load", heat_load, "Kcal"],
         ["Fuel Consumption", fuel_consumption, "Nm³"],
-        ["Calculated Firing Rate", calculated_firing_rate, "Nm³/hr"],
-        ["10% Extra Firing Rate", extra_firing_rate, "Nm³/hr"],
-        ["Firing Rate", final_firing_rate, "MW"],
+        ["Final Firing Rate", final_firing_rate, "MW"],
         ["Air Qty", air_qty, "Nm³/hr"],
-        ["CFM", cfm, "CFM"],
-        ["Blower Size as per Calculation", blower_size_calc, "HP"],
+        ["Blower Size", blower_size_calc, "HP"],
     ], columns=["Parameter", "Value", "Unit"])
 
-    # -------- Sheet 2: VLPH-120T --------
-    vlph_df = calculation_df.copy()
+    # -----------------------------
+    # BOM
+    # -----------------------------
+    bom_columns = [
+        "S. No.", "MEDIA", "ITEM NAME", "Data Sheet No / Reference",
+        "QTY", "UNIT", "MAKE", "BASIC", "TOTAL"
+    ]
 
-    # -------- Sheet 3: Cost Summary --------
-    cost_summary_df = pd.DataFrame([
-        ["Calculated Firing Rate (Nm³/hr)", calculated_firing_rate],
-        ["10% Extra Firing Rate (Nm³/hr)", extra_firing_rate],
-        ["Firing Rate (MW)", final_firing_rate],
-        ["Air Quantity (Nm³/hr)", air_qty],
-        ["CFM", cfm],
-        ["Blower Size (HP)", blower_size_calc],
-    ], columns=["Description", "Value"])
+    bom_data = [
+        [1,"COMB AIR","COMPENSATOR","300 NB F 150 #",1,"No.","ENCON",8000,8000],
+        [2,"COMB AIR","PRESSURE GAUGE WITH TNV","RANGE- 0-2000 mm WC, Dial-4\"",1,"No.","WIKA",4000,4000],
+        [3,"COMB AIR","PRESSURE SWITCH LOW (Set Pt -L)","RANGE- 5-150 mBAR",1,"No.","SWITZER",6500,6500],
+        [6,"COMB AIR","MOTERIZED CONTROL VALVE","250 NB, FLOW- 4000 Nm3/hr",1,"No.","CAIR",80000,80000],
+        [7,"COMB AIR","BUTTERFLY VALVE","300 NB",1,"No","AUDCO/ L&T/ LEADER",16950,16950],
+        [8,"COMB AIR","ROTARY JOINT","300 NB",1,"No","KRATOS/ENCON",50000,50000],
+        [9,"COMB AIR","BALL VALVE (Pilot Burner)","20 NB",1,"No.","AUDCO/ L&T/ LEADER",1600,1600],
+        [10,"COMB AIR","BALL VALVE (UV - LINE)","15 NB",1,"No.","AUDCO/ L&T/ LEADER",1500,1500],
+        [11,"COMB AIR","FLEXIBLE HOSE (Pilot Burner)","20 NB, 1500 mm LONG",1,"No.","BIL/ FLEXIBLE",1200,1200],
+        [12,"COMB AIR","FLEXIBLE HOSE (UV - LINE)","15 NB, 1500 mm LONG",1,"No.","BIL/ FLEXIBLE",1000,1000],
+        [13,"NG PILOT LINE","BALL VALVE","20 NB",2,"No.","AUDCO/ L&T/ LEADER",1600,3200],
+        [14,"NG PILOT LINE","PRESSURE GAUGE WITH NV","0-1600 mm WC, DIAL: 4\"",1,"No.","WIKA",4000,4000],
+        [15,"NG PILOT LINE","PRESSURE SWITCH HIGH + LOW","",2,"No.","SWITZER",12000,24000],
+        [16,"NG PILOT LINE","SOLENOID VALVE","15 NB",1,"No.","MADAS",6000,6000],
+        [17,"NG PILOT LINE","PRESSURE REGULATING VALVE","15 NB",1,"No.","MADAS",8000,8000],
+        [18,"NG PILOT LINE","FLEXIBALE HOSE PIPE","15 NB - 1500 mm LONG",1,"No.","BIL/FLEXIBLE",1200,1200],
+        [19,"MG LINE","NG GAS TRAIN","FLOW: 400 Nm3/hr",1,"No.","MADAS",295200,295200],
+        [24,"MG LINE","AGR","80 NB",1,"No.","MADAS",48250,48250],
+        [29,"MISC ITEMS","THERMOCOUPLE","R TYPE, 505 mm, 1200C",1,"No.","TEMPSENS",32000,32000],
+        [30,"MISC ITEMS","COMPENSATING LEAD","FOR R TYPE TC",1,"Roll.","TEMPSENS",5000,5000],
+        [32,"MISC ITEMS","LIMIT SWITCHES","",2,"Nos.","BCH",2300,4600],
+        [33,"MISC ITEMS","CONTROL PANEL","MCC",1,"No.","ENCON",150000,150000],
+        [34,"MISC ITEMS","HYDRAULIC POWER PACK & CYLINDER","10 HP, 1500 mm",1,"No.","VARITECH",310000,310000],
+        [35,"MISC ITEMS","CABLE FOR IGNITION TRANSFORMER","",20,"m","ENCON",200,4000],
+        [36,"MISC ITEMS","TEMPERATURE TRANSMITTER","",1,"No.","HONEYWELL",13000,13000],
+        [37,"MISC ITEMS","P.PID","",1,"No","HONEYWELL",8000,8000],
+        [38,"MISC ITEMS","RATIO CONTROLLER","",1,"No.","HONEYWELL",55000,55000],
+    ]
 
+    bom_df = pd.DataFrame(bom_data, columns=bom_columns)
+
+    bought_out_cost = bom_df[bom_df["ITEM NAME"] != "RATIO CONTROLLER"]["TOTAL"].sum()
+    bought_out_sell = bought_out_cost * MARKUP
+
+    # -----------------------------
+    # ENCON ITEMS (SELL SOURCE)
+    # -----------------------------
+    encon_df = pd.DataFrame([
+        [1,"MISC ITEMS","ENCON MG BURNER WITH B. BLOCK","NATURAL GAS FLOW: 440 Nm3/hr G7A",1,"No.","ENCON",118000,118000],
+        [8,"MISC ITEMS","COMBUSTION AIR BLOWER",'25 HP, 28" WC, 5100 Nm3/hr',1,"No.","ENCON",195000,195000],
+        [9,"MISC ITEMS","PILOT BURNER","10 KW",1,"No.","ENCON",12000,12000],
+        [10,"MISC ITEMS","IGNITION TRANSFORMER","",1,"No.","COFI/DANFOSS",5500,5500],
+        [11,"MISC ITEMS","SEQUENCE CONTROLLER","",1,"No.","LINEAR",10000,10000],
+        [12,"MISC ITEMS","UV SENSOR WITH AIR JACKET","",1,"No.","LINEAR",13000,13000],
+    ], columns=bom_columns)
+
+    inhouse_sell = encon_df["TOTAL"].sum()
+    inhouse_cost = inhouse_sell / MARKUP
+
+    # -----------------------------
+    # COST SUMMARY
+    # -----------------------------
+    unit_cost = bought_out_cost + inhouse_cost
+    unit_sell = bought_out_sell + inhouse_sell
+
+    designing_10 = unit_sell * 0.10
+    negotiation_10 = unit_sell * 0.10
+
+    total_price = unit_sell + designing_10 + negotiation_10
+    usd_price = total_price / 85
+
+    cost_summary_df = pd.DataFrame(
+        [[
+            1,
+            "Vertical Ladle Preheater",
+            bought_out_cost,
+            bought_out_sell,
+            inhouse_cost,
+            inhouse_sell,
+            unit_cost,
+            unit_sell,
+            designing_10,
+            negotiation_10,
+            1,
+            total_price,
+            MARKUP,
+            usd_price
+        ]],
+        columns=[
+            "S.No.",
+            "Item Description",
+            "Bought Out Cost Price",
+            "Bought Out Sell Price",
+            "Inhouse Cost Price",
+            "Inhouse Sell Price",
+            "Unit Cost Price",
+            "Unit Sell Price",
+            "10% Designing",
+            "10% Negotiation",
+            "Qty/Set",
+            "Total Price",
+            "Markup",
+            "USD"
+        ]
+    )
+
+    # -----------------------------
+    # WRITE EXCEL
+    # -----------------------------
     st.session_state.excel_buffer = io.BytesIO()
 
     with pd.ExcelWriter(st.session_state.excel_buffer, engine="xlsxwriter") as writer:
         calculation_df.to_excel(writer, sheet_name="Calculation", index=False)
-        vlph_df.to_excel(writer, sheet_name="VLPH-120T", index=False)
+        bom_df.to_excel(writer, sheet_name="VLPH-120T", index=False)
         cost_summary_df.to_excel(writer, sheet_name="Cost Summary", index=False)
 
     st.session_state.excel_buffer.seek(0)
 
-    # -------- Word Offer --------
+    # -----------------------------
+    # WORD OFFER
+    # -----------------------------
     doc = DocxTemplate("Offer_Template.docx")
     doc.render(offer_context)
-
     st.session_state.word_buffer = io.BytesIO()
     doc.save(st.session_state.word_buffer)
     st.session_state.word_buffer.seek(0)
